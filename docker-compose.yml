@@ -1,0 +1,69 @@
+version: '3.8'
+
+services:
+  mongo:
+    image: mongo:latest
+    container_name: transactions_db
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: root
+      MONGO_INITDB_DATABASE: transactions
+    volumes:
+      - ./mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
+
+  rabbitmq:
+    image: rabbitmq:3.9-management  # Includes web UI (port 15672)
+    container_name: rabbitmq
+    restart: unless-stopped
+    ports:
+      - "5672:5672"    # Default port for RabbitMQ messaging
+      - "15672:15672"  # Management UI (localhost:15672)
+    environment:
+      RABBITMQ_DEFAULT_USER: admin
+      RABBITMQ_DEFAULT_PASS: admin
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq  # ✅ Persistent message storage
+
+  analyticsworker:
+    build: 
+      context: .
+      dockerfile: AnalyticsWorker.Dockerfile
+    container_name: analytics_worker
+    environment:
+      - transactionsDb__connectionString=mongodb://root:root@mongo:27017
+      - transactionsDb__database=transactions
+      - RabbitMQ__Host=rabbitmq
+      - RabbitMQ__Username=admin
+      - RabbitMQ__Password=admin
+      - RabbitMQ__QueueName=transactions_batch_queue
+    ports:
+      - "8081:80"
+    depends_on:
+      - mongo
+      - rabbitmq
+    restart: always
+
+  transactionsapi:
+    build: 
+      context: .
+      dockerfile: TransactionsApi.Dockerfile
+    container_name: transactions_api
+    environment:
+      - transactionsDb__connectionString=mongodb://root:root@mongo:27017
+      - transactionsDb__database=transactions
+      - RabbitMQ__Host=rabbitmq
+      - RabbitMQ__Username=admin
+      - RabbitMQ__Password=admin
+      - RabbitMQ__QueueName=transactions_batch_queue
+      - ASPNETCORE_URLS=http://+:8080
+    ports:
+      - "8080:8080"
+    depends_on:
+      - mongo
+      - rabbitmq
+    restart: always
+
+volumes:
+  rabbitmq_data:  # ✅ Define the volume
